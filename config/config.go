@@ -1,5 +1,6 @@
-// Package config loads escowx settings from config.yaml, creating the file
-// with sensible defaults the first time the program runs.
+// Package config loads ttywx settings from config.yaml and edits its list
+// of locations. A missing file is reported to the caller (as an error
+// matching os.ErrNotExist) so it can run first-time setup.
 package config
 
 import (
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/j4mes/ttywx/units"
 )
 
 // PlaceholderContact is the contact written to a fresh config. NWS asks that
@@ -36,6 +39,8 @@ type Config struct {
 	LogFile   string     `yaml:"log_file"`
 	Bell      bool       `yaml:"bell"`
 	Notify    bool       `yaml:"notify"`
+	Units     string     `yaml:"units"` // imperial | metric
+	Clock     string     `yaml:"clock"` // 12h | 24h
 	Locations []Location `yaml:"locations"`
 
 	// path is where the config was loaded from; relative paths in the
@@ -43,85 +48,119 @@ type Config struct {
 	path string
 }
 
-const defaultYAML = `# escowx configuration.
-# Created automatically with defaults; edit freely and restart escowx.
+const templateYAML = `# ttywx configuration. Edit freely and restart ttywx.
+# Add or remove places with: ttywx add "City, ST" / ttywx remove NAME
 
 # api.weather.gov requires a User-Agent that identifies you. Put an email
 # address or website here so NWS can reach you if your traffic misbehaves.
-# Can also be overridden with --contact or the ESCOWX_CONTACT env var.
-contact: ` + PlaceholderContact + `
+# Can also be overridden with --contact or the TTYWX_CONTACT env var.
+contact: %s
+
+units: imperial   # imperial (°F, mph) or metric (°C, km/h)
+clock: 12h        # 12h or 24h
 
 refresh:
   alerts: 60s     # active alerts
   forecast: 10m   # observations + forecasts
 
 # Mode changes are appended to a log. The default location is
-# $XDG_STATE_HOME/escowx/escowx.log (~/.local/state/escowx/escowx.log).
+# $XDG_STATE_HOME/ttywx/ttywx.log (~/.local/state/ttywx/ttywx.log).
 # Uncomment to override; relative paths are relative to this file.
-# log_file: ~/escowx.log
+# log_file: ~/ttywx.log
 
 bell: true     # ring the terminal bell when a location enters TAKE COVER
 notify: true   # best-effort desktop notification (notify-send / osascript)
 
-# The location marked primary is shown in the large panel. If none is marked,
+# The location marked primary is shown on the Main tab. If none is marked,
 # the first one is used. Coordinates are rounded to 4 decimals for the API.
+# NWS covers the United States and its territories only.
 locations:
-  - { name: Escondido,     lat: 33.1192, lon: -117.0864, primary: true }
-  - { name: San Marcos,    lat: 33.1434, lon: -117.1661 }
-  - { name: Valley Center, lat: 33.2184, lon: -117.0342 }
-  - { name: Ramona,        lat: 33.0417, lon: -116.8681 }
-  - { name: Poway,         lat: 32.9628, lon: -117.0359 }
-  - { name: Vista,         lat: 33.2000, lon: -117.2425 }
-  - { name: Oceanside,     lat: 33.1959, lon: -117.3795 }
-  - { name: San Diego,     lat: 32.7157, lon: -117.1611 }
-  - { name: Julian,        lat: 33.0787, lon: -116.6020 }
-`
+%s`
 
-// DefaultPath is $XDG_CONFIG_HOME/escowx/config.yaml (~/.config/escowx on
+// Template renders a fresh, commented config file with the given contact
+// (PlaceholderContact if empty) and locations.
+func Template(contact string, locs []Location) []byte {
+	if contact == "" {
+		contact = PlaceholderContact
+	}
+	var b strings.Builder
+	for _, l := range locs {
+		b.WriteString("  - " + flowLocation(l) + "\n")
+	}
+	return []byte(fmt.Sprintf(templateYAML, yamlScalar(contact), b.String()))
+}
+
+func flowLocation(l Location) string {
+	s := fmt.Sprintf("{ name: %s, lat: %.4f, lon: %.4f", yamlScalar(l.Name), l.Lat, l.Lon)
+	if l.Primary {
+		s += ", primary: true"
+	}
+	return s + " }"
+}
+
+// yamlScalar quotes s if it wouldn't survive as a plain YAML scalar.
+func yamlScalar(s string) string {
+	out, err := yaml.Marshal(s)
+	if err != nil {
+		return fmt.Sprintf("%q", s)
+	}
+	return strings.TrimSuffix(string(out), "\n")
+}
+
+// DefaultPath is $XDG_CONFIG_HOME/ttywx/config.yaml (~/.config/ttywx on
 // Linux, the platform equivalent elsewhere).
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "escowx", "config.yaml"), nil
+	return filepath.Join(dir, "ttywx", "config.yaml"), nil
 }
 
-// defaultLogPath is $XDG_STATE_HOME/escowx/escowx.log, falling back to
+// defaultLogPath is $XDG_STATE_HOME/ttywx/ttywx.log, falling back to
 // ~/.local/state, which is where the XDG spec puts logs.
 func defaultLogPath() string {
 	dir := os.Getenv("XDG_STATE_HOME")
 	if !filepath.IsAbs(dir) {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "escowx.log"
+			return "ttywx.log"
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "escowx", "escowx.log")
+	return filepath.Join(dir, "ttywx", "ttywx.log")
 }
 
-// Load reads the config at path, writing the defaults there first if the
-// file does not exist. created reports whether that happened.
-func Load(path string) (cfg *Config, created bool, err error) {
+// Load reads the config at path. A missing file yields an error matching
+// os.ErrNotExist.
+func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, false, fmt.Errorf("creating config dir: %w", err)
-		}
-		if err := os.WriteFile(path, []byte(defaultYAML), 0o644); err != nil {
-			return nil, false, fmt.Errorf("writing default config: %w", err)
-		}
-		data, created = []byte(defaultYAML), true
-	} else if err != nil {
-		return nil, false, err
-	}
-	cfg, err = Parse(data)
 	if err != nil {
-		return nil, created, fmt.Errorf("%s: %w", path, err)
+		return nil, err
+	}
+	cfg, err := Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	cfg.path = path
-	return cfg, created, nil
+	return cfg, nil
+}
+
+// Write creates path (and its directory) with the given contents, refusing
+// to replace an existing file.
+func Write(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("creating config dir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // Parse decodes and validates config YAML, filling in defaults for any
@@ -137,7 +176,17 @@ func Parse(data []byte) (*Config, error) {
 		return nil, err
 	}
 	if len(cfg.Locations) == 0 {
-		return nil, errors.New("no locations configured")
+		return nil, errors.New(`no locations configured (add one with: ttywx add "City, ST")`)
+	}
+	switch cfg.Units {
+	case "", "imperial", "metric":
+	default:
+		return nil, fmt.Errorf("units must be imperial or metric, not %q", cfg.Units)
+	}
+	switch cfg.Clock {
+	case "", "12h", "24h":
+	default:
+		return nil, fmt.Errorf("clock must be 12h or 24h, not %q", cfg.Clock)
 	}
 	if cfg.Refresh.Alerts < 15*time.Second {
 		cfg.Refresh.Alerts = 15 * time.Second
@@ -146,6 +195,7 @@ func Parse(data []byte) (*Config, error) {
 		cfg.Refresh.Forecast = time.Minute
 	}
 	primary := -1
+	seen := map[string]bool{}
 	for i, l := range cfg.Locations {
 		if l.Name == "" {
 			return nil, fmt.Errorf("location %d has no name", i+1)
@@ -153,6 +203,12 @@ func Parse(data []byte) (*Config, error) {
 		if l.Lat < -90 || l.Lat > 90 || l.Lon < -180 || l.Lon > 180 {
 			return nil, fmt.Errorf("location %q has invalid coordinates", l.Name)
 		}
+		// Names identify locations in the log and in `ttywx remove`.
+		key := strings.ToLower(l.Name)
+		if seen[key] {
+			return nil, fmt.Errorf("location name %q is used twice", l.Name)
+		}
+		seen[key] = true
 		if l.Primary && primary < 0 {
 			primary = i
 		}
@@ -185,4 +241,12 @@ func (c *Config) LogPath() string {
 		return p
 	}
 	return filepath.Join(filepath.Dir(c.path), p)
+}
+
+// Path is the file the config was loaded from.
+func (c *Config) Path() string { return c.path }
+
+// Display returns the configured units and clock.
+func (c *Config) Display() units.Units {
+	return units.Units{Metric: c.Units == "metric", Clock24: c.Clock == "24h"}
 }

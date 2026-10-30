@@ -1,32 +1,79 @@
-# escowx
+# ttywx
 
-A btop-style terminal dashboard for live National Weather Service data around
-Escondido, CA: current conditions, forecasts, and active alerts, with a
-four-level threat mode per location.
+A btop-style terminal dashboard for live National Weather Service data:
+current conditions, forecasts, a map, and active alerts for the places you
+care about, with a four-level threat mode that turns into a flashing
+**TAKE COVER** banner when it matters.
 
-> escowx is where this project started, tuned for one corner of San Diego
-> County. Its general-purpose successor is
-> [ttywx](https://github.com/j4mes/ttywx): any US location, place-name lookup,
-> metric units, and release binaries. New users should start there.
+<!-- Record with: go build -o ttywx . && vhs docs/demo.tape -->
+![ttywx dashboard](docs/demo.gif)
 
-Data comes only from [api.weather.gov](https://www.weather.gov/documentation/services-web-api) (no API key).
+- Works anywhere the NWS covers: all 50 states, DC, Puerto Rico, Guam, the
+  US Virgin Islands, American Samoa and the Northern Mariana Islands.
+- Data comes only from [api.weather.gov](https://www.weather.gov/documentation/services-web-api).
+  You don't need an API key or an account.
+- Imperial or metric, 12- or 24-hour clock.
+- A single static binary for Linux, macOS, Windows and FreeBSD.
 
-## Build
+ttywx started life as [escowx](https://github.com/j4mes/escowx), a dashboard
+for one corner of San Diego County.
 
-Requires Go 1.24+.
+## Install
+
+Download a binary from the [releases page](https://github.com/j4mes/ttywx/releases),
+or with Go 1.24+:
 
 ```sh
-CGO_ENABLED=0 go build -o escowx .
-go test ./...
+go install github.com/j4mes/ttywx@latest
 ```
 
-## Run
+Or build from source:
 
 ```sh
-./escowx                 # full-screen dashboard
-./escowx --once          # plain-text summary, then exit (for scripts/cron)
-./escowx --demo          # inject fake alerts to preview every mode
-./escowx --config ./other.yaml --contact me@example.com
+git clone https://github.com/j4mes/ttywx && cd ttywx
+CGO_ENABLED=0 go build -o ttywx .
+```
+
+## Getting started
+
+Run `ttywx`. The first time, it asks where you are and writes a config file:
+
+```
+$ ttywx
+Welcome to ttywx! There's no config at ~/.config/ttywx/config.yaml yet, so let's make one.
+ttywx shows National Weather Service data, which covers the US and its territories.
+
+Your main location ("City, ST", ZIP code, or lat,lon): Springfield
+Which one?
+   1) Springfield, MO (Greene)
+   2) Springfield, IL (Sangamon)
+   3) Springfield, MA (Hampden)
+   ...
+```
+
+Add more places at any time:
+
+```sh
+ttywx add "Boulder, CO"
+ttywx add 10001                      # ZIP code
+ttywx add 44.2706,-71.3033 --name "Mt Washington"
+ttywx add "Denver, CO" --primary     # show it on the Main tab
+ttywx remove Boulder
+```
+
+Place names are looked up with the free [Open-Meteo geocoding
+API](https://open-meteo.com/en/docs/geocoding-api). That is the only request
+ttywx makes anywhere other than api.weather.gov, and it happens only when you
+add a place.
+
+## Usage
+
+```sh
+ttywx                 # full-screen dashboard
+ttywx --once          # plain-text summary, then exit (for scripts/cron)
+ttywx --demo          # inject fake alerts to preview every mode
+ttywx --config ./other.yaml --contact me@example.com
+ttywx --version
 ```
 
 `--once` exits 0 on success and 1 if no location could be loaded. It can be
@@ -34,25 +81,28 @@ combined with `--demo`.
 
 ## Config
 
-On first run `~/.config/escowx/config.yaml` is created with the default
-locations (`$XDG_CONFIG_HOME` is respected; `--config` points elsewhere). Edit
-it to add or remove places:
+The config lives at `~/.config/ttywx/config.yaml`. ttywx respects
+`$XDG_CONFIG_HOME`, uses the platform equivalent on macOS and Windows, and
+`--config` points it elsewhere. `ttywx add` / `remove` edit the file in place
+and keep your comments and formatting. You can also edit it by hand:
 
 ```yaml
 contact: you@example.com      # sent in the User-Agent; NWS asks for real contact info
+units: imperial               # or metric (°C, km/h, hPa; also metric forecast text)
+clock: 12h                    # or 24h
 refresh:
   alerts: 60s
   forecast: 10m               # observations + forecasts
-# log_file: ~/escowx.log      # default: ~/.local/state/escowx/escowx.log
+# log_file: ~/ttywx.log       # default: ~/.local/state/ttywx/ttywx.log
 bell: true                    # terminal bell on entering TAKE COVER
 notify: true                  # desktop notification (notify-send / osascript)
 locations:
-  - { name: Escondido, lat: 33.1192, lon: -117.0864, primary: true }
-  - { name: Julian,    lat: 33.0787, lon: -116.6020 }
+  - { name: Denver,  lat: 39.7392, lon: -104.9847, primary: true }
+  - { name: Boulder, lat: 40.0150, lon: -105.2705 }
 ```
 
-The contact can also be set with `--contact` or `ESCOWX_CONTACT`. The location
-marked `primary` gets the large panel.
+The contact can also be set with `--contact` or `TTYWX_CONTACT`. The location
+marked `primary` gets the Main tab.
 
 ## Threat modes
 
@@ -60,14 +110,16 @@ marked `primary` gets the large panel.
 |---|---|---|
 | NORMAL | green | no alerts, Statements, Outlooks |
 | WARNING | yellow | Advisories and Watches |
-| HEIGHTENED WARNING | orange | Warnings (Red Flag, High Wind, Flash Flood, …) |
+| HEIGHTENED WARNING | orange | Warnings (Red Flag, High Wind, Flash Flood, Winter Storm, …) |
 | TAKE COVER | red, flashing banner | Tornado / Extreme Wind / Tsunami Warning, Flash Flood or Tornado Emergency, civil emergencies, or any Extreme + Immediate alert |
 
 The event→mode table lives in [`modes/events.go`](modes/events.go). Events
 not in the table fall back to severity ("Severe" → HEIGHTENED), then wording
 ("…Warning", "…Watch", …). Each location shows its worst live alert; the header
 shows the worst location overall. Mode changes are appended to
-`~/.local/state/escowx/escowx.log` (`$XDG_STATE_HOME` is respected).
+`~/.local/state/ttywx/ttywx.log` (`$XDG_STATE_HOME` is respected). Entering
+TAKE COVER also rings the terminal bell and sends a desktop notification
+(both can be turned off).
 
 ## Tabs
 
@@ -104,20 +156,34 @@ appear on every tab.
 - Requests time out, retry 5xx/429 with exponential backoff, and never blank
   the screen. If a refresh fails, the last good data stays up with a **STALE** marker.
 - Observations come from the location's nearest station. If its latest report
-  has no temperature (common with personal weather stations), the next nearest
-  is tried, up to five. Sky text falls back to the current hourly forecast.
+  has no temperature (common with personal weather stations), ttywx tries the
+  next nearest station, up to five. Sky text falls back to the current hourly forecast.
+- A location outside NWS coverage gets a clear message instead of endless
+  retries.
 
-## Layout
+## Development
+
+```sh
+go test ./...
+go run . --demo
+```
 
 ```
 api/      NWS client, types, unit conversion
+geo/      place-name lookup (Open-Meteo) for `ttywx add` and first-run setup
+units/    imperial/metric and 12/24h formatting
+config/   config.yaml loading, template, and in-place location edits
 modes/    alert → threat-mode classification (+ tests with sample alert JSON)
 wx/       per-location state, fetch orchestration, alert merging
 ui/       Bubble Tea model and views (mapview.go: the Map tab)
 tracker/  mode-change log, bell, desktop notifications
 demo/     fake alerts for --demo
-config/   config.yaml loading/defaults
+docs/     README recording (demo.tape) and its config
 ```
+
+To make a release, push a tag: `git tag v1.0.0 && git push --tags`. GitHub
+Actions runs [goreleaser](https://goreleaser.com) to build the binaries and
+publish them on the releases page.
 
 ## License
 

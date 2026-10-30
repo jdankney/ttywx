@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/j4mes/escowx/api"
-	"github.com/j4mes/escowx/modes"
+	"github.com/j4mes/ttywx/api"
+	"github.com/j4mes/ttywx/modes"
 )
 
 func TestFailedFetchKeepsLastGoodData(t *testing.T) {

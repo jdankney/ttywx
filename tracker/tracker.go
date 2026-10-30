@@ -1,5 +1,5 @@
 // Package tracker watches per-location mode transitions: it logs them to
-// escowx.log and fires the bell / desktop notification when a location
+// ttywx.log and fires the bell / desktop notification when a location
 // first enters TAKE COVER.
 package tracker
 
@@ -9,11 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/j4mes/escowx/api"
-	"github.com/j4mes/escowx/modes"
+	"github.com/j4mes/ttywx/api"
+	"github.com/j4mes/ttywx/modes"
 )
 
 type Tracker struct {
@@ -98,12 +99,18 @@ func notify(title, body string) {
 		if _, err := exec.LookPath("notify-send"); err != nil {
 			return
 		}
-		cmd = exec.Command("notify-send", "-u", "critical", "-a", "escowx", title, body)
+		cmd = exec.Command("notify-send", "-u", "critical", "-a", "ttywx", title, body)
 	case "darwin":
 		cmd = exec.Command("osascript", "-e",
-			fmt.Sprintf("display notification %q with title %q sound name \"Sosumi\"", body, title))
+			fmt.Sprintf("display notification %s with title %s sound name \"Sosumi\"", appleScriptString(body), appleScriptString(title)))
 	default:
 		return
 	}
 	_ = cmd.Run()
+}
+
+// appleScriptString quotes s as an AppleScript string literal, which only
+// needs backslashes and double quotes escaped (unlike Go's %q).
+func appleScriptString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }

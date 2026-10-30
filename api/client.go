@@ -15,8 +15,9 @@ import (
 
 const DefaultBaseURL = "https://api.weather.gov"
 
-// Version is reported in the User-Agent.
-const Version = "0.1"
+// Version is reported in the User-Agent and by --version. Release builds
+// set it with -ldflags "-X github.com/j4mes/ttywx/api.Version=v1.2.3".
+var Version = "dev"
 
 // Client fetches and decodes NWS API resources. It is safe for concurrent use.
 type Client struct {
@@ -29,6 +30,11 @@ type Client struct {
 	Retries   int
 	RetryBase time.Duration
 
+	// SI requests forecasts in metric units, which also makes the NWS
+	// forecast prose metric ("high near 19, wind 9 km/h"). Temperatures
+	// are still converted back to °F so callers see one unit.
+	SI bool
+
 	sem chan struct{}
 }
 
@@ -36,7 +42,7 @@ type Client struct {
 func NewClient(contact string) *Client {
 	return &Client{
 		BaseURL:   DefaultBaseURL,
-		UserAgent: fmt.Sprintf("escowx/%s (contact: %s)", Version, contact),
+		UserAgent: fmt.Sprintf("ttywx/%s (contact: %s)", Version, contact),
 		HTTP:      &http.Client{Timeout: 20 * time.Second},
 		Retries:   3,
 		RetryBase: time.Second,

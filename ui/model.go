@@ -3,18 +3,20 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/j4mes/escowx/api"
-	"github.com/j4mes/escowx/config"
-	"github.com/j4mes/escowx/demo"
-	"github.com/j4mes/escowx/modes"
-	"github.com/j4mes/escowx/tracker"
-	"github.com/j4mes/escowx/wx"
+	"github.com/j4mes/ttywx/api"
+	"github.com/j4mes/ttywx/config"
+	"github.com/j4mes/ttywx/demo"
+	"github.com/j4mes/ttywx/modes"
+	"github.com/j4mes/ttywx/tracker"
+	"github.com/j4mes/ttywx/units"
+	"github.com/j4mes/ttywx/wx"
 )
 
 const (
@@ -45,6 +47,7 @@ func (t tab) String() string {
 
 type Model struct {
 	cfg     *config.Config
+	u       units.Units // display units and clock, from cfg
 	client  *api.Client
 	tracker *tracker.Tracker
 	ctx     context.Context
@@ -86,7 +89,7 @@ type Model struct {
 func New(cfg *config.Config, client *api.Client, tr *tracker.Tracker, demoMode bool) *Model {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Model{
-		cfg: cfg, client: client, tracker: tr,
+		cfg: cfg, u: cfg.Display(), client: client, tracker: tr,
 		ctx: ctx, cancel: cancel,
 		now:       time.Now(),
 		gridCols:  2,
@@ -146,7 +149,7 @@ func (m *Model) resolvePoint(i int) tea.Cmd {
 }
 
 func (m *Model) fetchAlerts(i int) tea.Cmd {
-	if m.alertBusy[i] {
+	if m.alertBusy[i] || errors.Is(m.locs[i].PointErr, api.ErrNoCoverage) {
 		return nil
 	}
 	m.alertBusy[i] = true
@@ -234,6 +237,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		l := m.locs[msg.i]
 		if msg.err != nil {
 			l.PointErr = msg.err
+			if errors.Is(msg.err, api.ErrNoCoverage) {
+				return m, nil // retrying won't help
+			}
 			return m, tea.Tick(pointRetry, func(time.Time) tea.Msg { return retryPointMsg{msg.i} })
 		}
 		l.Point, l.PointErr = msg.pt, nil
@@ -487,6 +493,9 @@ func (m *Model) Shutdown() { m.cancel() }
 // statusLine summarises locations that are failing to load.
 func (m *Model) statusLine() string {
 	for _, l := range m.locs {
+		if errors.Is(l.PointErr, api.ErrNoCoverage) {
+			return fmt.Sprintf("%s is outside NWS coverage (US only); remove it with: ttywx remove %q", l.Cfg.Name, l.Cfg.Name)
+		}
 		if l.Point == nil && l.PointErr != nil {
 			return fmt.Sprintf("%s: location lookup failed (%v), retrying", l.Cfg.Name, l.PointErr)
 		}

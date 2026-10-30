@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/j4mes/escowx/api"
-	"github.com/j4mes/escowx/config"
-	"github.com/j4mes/escowx/modes"
+	"github.com/j4mes/ttywx/api"
+	"github.com/j4mes/ttywx/config"
+	"github.com/j4mes/ttywx/modes"
 )
 
 const (

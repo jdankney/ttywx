@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -9,10 +10,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/j4mes/escowx/api"
-	"github.com/j4mes/escowx/config"
-	"github.com/j4mes/escowx/modes"
-	"github.com/j4mes/escowx/wx"
+	"github.com/j4mes/ttywx/api"
+	"github.com/j4mes/ttywx/config"
+	"github.com/j4mes/ttywx/modes"
+	"github.com/j4mes/ttywx/units"
+	"github.com/j4mes/ttywx/wx"
 )
 
 const (
@@ -27,7 +29,7 @@ func (m *Model) View() string {
 	}
 	W, H := m.width, m.height
 	if W < minWidth || H < minHeight {
-		msg := fmt.Sprintf("escowx needs at least %d×%d\ncurrent: %d×%d", minWidth, minHeight, W, H)
+		msg := fmt.Sprintf("ttywx needs at least %d×%d\ncurrent: %d×%d", minWidth, minHeight, W, H)
 		return lipgloss.Place(W, H, lipgloss.Center, lipgloss.Center, sDim.Render(msg))
 	}
 
@@ -62,7 +64,7 @@ func (m *Model) View() string {
 
 func (m *Model) viewHeader(W int) string {
 	mode, idx := wx.Overall(m.locs)
-	left := lipgloss.NewStyle().Foreground(colAccent).Bold(true).Render(" escowx ") + badge(mode, false)
+	left := lipgloss.NewStyle().Foreground(colAccent).Bold(true).Render(" ttywx ") + badge(mode, false)
 	if idx >= 0 {
 		cause := m.locs[idx].Cfg.Name
 		if c := m.locs[idx].Cause; c != nil {
@@ -78,11 +80,11 @@ func (m *Model) viewHeader(W int) string {
 
 	right := sDim.Render("alerts ") + m.dataAge(func(l *wx.Location) time.Time { return l.AlertsUpdated }) +
 		sFaint.Render(" │ ") + sDim.Render("wx ") + m.dataAge(func(l *wx.Location) time.Time { return l.WxUpdated }) +
-		sFaint.Render(" │ ") + sBold.Render(m.now.Format("Mon Jan 2  3:04:05 PM")) + " "
+		sFaint.Render(" │ ") + sBold.Render(m.now.Format(m.u.Layout("Mon Jan 2  {clocksec}"))) + " "
 
 	gap := W - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
-		right = sBold.Render(m.now.Format("3:04:05 PM")) + " "
+		right = sBold.Render(m.now.Format(m.u.Layout("{clocksec}"))) + " "
 		gap = max(1, W-lipgloss.Width(left)-lipgloss.Width(right))
 	}
 	return left + strings.Repeat(" ", gap) + right
@@ -119,6 +121,9 @@ func (m *Model) viewTabs(W int) string {
 func (m *Model) dataAge(get func(*wx.Location) time.Time) string {
 	var oldest time.Time
 	for _, l := range m.locs {
+		if errors.Is(l.PointErr, api.ErrNoCoverage) {
+			continue // never loads; the footer explains
+		}
 		t := get(l)
 		if t.IsZero() {
 			return sDim.Render("loading…")
@@ -155,7 +160,7 @@ func (m *Model) viewFooter(W int) string {
 	if st := m.statusLine(); st != "" {
 		s += sErr.Render(st)
 	} else if m.cfg.Contact == config.PlaceholderContact {
-		s += sStale.Render("set `contact` in ~/.config/escowx/config.yaml")
+		s += sStale.Render("set `contact` in " + m.cfg.Path())
 	}
 	return padRight(s, W)
 }
@@ -281,7 +286,8 @@ func (m *Model) viewList(idx []int, W, H int) string {
 		}
 		temp := "  —  "
 		if l.Obs != nil && l.Obs.TempF != nil {
-			temp = lipgloss.NewStyle().Foreground(tempColor(*l.Obs.TempF)).Render(fmt.Sprintf("%3.0f°F", *l.Obs.TempF))
+			t := m.u.Temp(*l.Obs.TempF)
+			temp = lipgloss.NewStyle().Foreground(tempColor(*l.Obs.TempF)).Render(strings.Repeat(" ", max(0, 5-lipgloss.Width(t))) + t)
 		}
 		mark := "  "
 		if m.isSelected(i) {
@@ -379,9 +385,9 @@ func (m *Model) viewCell(i, w, h int) string {
 	b := badge(l.Mode, true)
 	temp := "—"
 	if l.Obs != nil && l.Obs.TempF != nil {
-		t := fmt.Sprintf("%.0f°F", *l.Obs.TempF)
-		if lipgloss.Width(b)+1+len(t) > inner {
-			t = strings.TrimSuffix(t, "F")
+		t := m.u.Temp(*l.Obs.TempF)
+		if lipgloss.Width(b)+1+lipgloss.Width(t) > inner {
+			t = strings.TrimSuffix(t, m.u.TempSymbol())
 		}
 		temp = lipgloss.NewStyle().Foreground(tempColor(*l.Obs.TempF)).Bold(true).Render(t)
 	}
@@ -400,7 +406,7 @@ func (m *Model) viewCell(i, w, h int) string {
 
 	// Extras fill whatever room the alerts leave, in priority order.
 	var extras []string
-	if hi, lo, ok := todayHiLo(l.Forecast); ok {
+	if hi, lo, ok := todayHiLo(m.u, l.Forecast); ok {
 		extras = append(extras, sDim.Render(hi+"  "+lo))
 	}
 	if o := l.Obs; o != nil {
@@ -408,9 +414,9 @@ func (m *Model) viewCell(i, w, h int) string {
 		if o.Humidity != nil {
 			hum = fmt.Sprintf("%.0f%%", *o.Humidity)
 		}
-		extras = append(extras, sDim.Render("Wind ")+sText.Render(windText(o))+sDim.Render(" · RH ")+sText.Render(hum))
+		extras = append(extras, sDim.Render("Wind ")+sText.Render(windText(m.u, o))+sDim.Render(" · RH ")+sText.Render(hum))
 	}
-	if sp := sparkline(l.Hourly, inner-4); sp != "" {
+	if sp := sparkline(m.u, l.Hourly, inner-4); sp != "" {
 		extras = append(extras, sDim.Render("12h ")+sp)
 	}
 	room := h - 2 - 2 - len(alertLines)
@@ -457,7 +463,7 @@ func (m *Model) viewPrimary(w, h int, withForecast bool) string {
 		if !withForecast {
 			rows = clamp(h-2-len(body)-5, 3, 10)
 		}
-		strip := hourlyStrip(l.Hourly, inner, rows)
+		strip := hourlyStrip(m.u, l.Hourly, inner, rows)
 		n := min(len(l.Hourly), inner/4)
 		body = append(body, "", sAccent.Bold(true).Render(fmt.Sprintf("Next %d hours", n)))
 		body = append(body, strip...)
@@ -465,7 +471,7 @@ func (m *Model) viewPrimary(w, h int, withForecast bool) string {
 	if withForecast && len(l.Forecast) > 0 {
 		body = append(body, "", sAccent.Bold(true).Render("Forecast"))
 		for _, p := range l.Forecast {
-			body = append(body, forecastLine(p, inner))
+			body = append(body, forecastLine(m.u, p, inner))
 		}
 	}
 
@@ -498,7 +504,7 @@ func (m *Model) viewForecast(w, h int) string {
 	n := max(1, len(l.Forecast))
 	per := (h - 2) / n // lines available per period, including its headline
 	for _, p := range l.Forecast {
-		body = append(body, forecastLine(p, inner))
+		body = append(body, forecastLine(m.u, p, inner))
 		detail := wrap(p.Detailed, inner-2)
 		k := clamp(per-2, 0, len(detail)) // leave a spacer line
 		if k < len(detail) && k > 0 {
@@ -524,14 +530,14 @@ func (m *Model) currentBlock(l *wx.Location, inner int) []string {
 	o := l.Obs
 	var big []string
 	if o.TempF != nil {
-		big = bigText(fmt.Sprintf("%.0f°F", *o.TempF), lipgloss.NewStyle().Foreground(tempColor(*o.TempF)).Bold(true))
+		big = bigText(m.u.Temp(*o.TempF), lipgloss.NewStyle().Foreground(tempColor(*o.TempF)).Bold(true))
 	} else {
-		big = bigText("--°F", sDim)
+		big = bigText("--°"+m.u.TempSymbol(), sDim)
 	}
 
 	feels := "—"
 	if o.FeelsLikeF != nil {
-		feels = fmt.Sprintf("%.0f°F", *o.FeelsLikeF)
+		feels = m.u.Temp(*o.FeelsLikeF)
 	}
 	hum := "—"
 	if o.Humidity != nil {
@@ -539,12 +545,12 @@ func (m *Model) currentBlock(l *wx.Location, inner int) []string {
 	}
 	dew := "—"
 	if o.DewpointF != nil {
-		dew = fmt.Sprintf("%.0f°F", *o.DewpointF)
+		dew = m.u.Temp(*o.DewpointF)
 	}
 	details := []string{
 		sBold.Render(conditions(l)),
 		sDim.Render("Feels like ") + sText.Render(feels) + sDim.Render("  Humidity ") + sText.Render(hum),
-		sDim.Render("Wind ") + sText.Render(windText(o)) + sDim.Render("  Dew pt ") + sText.Render(dew),
+		sDim.Render("Wind ") + sText.Render(windText(m.u, o)) + sDim.Render("  Dew pt ") + sText.Render(dew),
 	}
 
 	gap := "   "
@@ -561,13 +567,13 @@ func (m *Model) currentBlock(l *wx.Location, inner int) []string {
 
 	var extra []string
 	if o.PressureInHg != nil {
-		extra = append(extra, sDim.Render("Pressure ")+sText.Render(fmt.Sprintf("%.2f inHg", *o.PressureInHg)))
+		extra = append(extra, sDim.Render("Pressure ")+sText.Render(m.u.Pressure(*o.PressureInHg)))
 	}
 	if o.VisibilityMi != nil {
-		extra = append(extra, sDim.Render("Vis ")+sText.Render(fmt.Sprintf("%.0f mi", *o.VisibilityMi)))
+		extra = append(extra, sDim.Render("Vis ")+sText.Render(m.u.Distance(*o.VisibilityMi)))
 	}
 	if o.Precip3hIn != nil {
-		extra = append(extra, sDim.Render("Precip 3h ")+sText.Render(fmt.Sprintf("%.2f in", *o.Precip3hIn)))
+		extra = append(extra, sDim.Render("Precip 3h ")+sText.Render(m.u.Precip(*o.Precip3hIn)))
 	}
 	if len(extra) > 0 {
 		out = append(out, strings.Join(extra, "  "))
@@ -576,7 +582,7 @@ func (m *Model) currentBlock(l *wx.Location, inner int) []string {
 	if o.StationName != "" && o.StationName != stn {
 		stn += " " + o.StationName
 	}
-	out = append(out, sFaint.Render(fmt.Sprintf("Station %s · observed %s", stn, clock(o.Time))))
+	out = append(out, sFaint.Render(fmt.Sprintf("Station %s · observed %s", stn, m.u.Clock(o.Time))))
 	return out
 }
 
@@ -628,7 +634,7 @@ func (m *Model) viewAlerts(W, H int) string {
 			}
 			row := mark + padRight(badge(e.Mode, true), modeW-2) + " " +
 				modeFg(e.Mode).Bold(true).Render(padRight(e.Alert.Event, eventW)) + " " +
-				sText.Render(padRight(fmtWhen(e.Alert.EndTime(), m.now), expW)) + " "
+				sText.Render(padRight(fmtWhen(m.u, e.Alert.EndTime(), m.now), expW)) + " "
 			if areaW > 6 {
 				row += sDim.Render(padRight(e.Alert.AreaDesc, areaW))
 			}
@@ -690,10 +696,10 @@ func (m *Model) alertDetail(e wx.AlertEntry) string {
 	line("Locations", strings.Join(e.Locations, ", "))
 	line("Severity", strings.Join(nonEmpty(a.Severity, a.Urgency, a.Certainty), " · "))
 	line("Issued by", a.SenderName)
-	line("Sent", fmtTime(a.Sent))
-	line("Onset", fmtTime(a.Onset))
-	line("Expires", fmtTime(a.Expires))
-	line("Ends", fmtTime(a.Ends))
+	line("Sent", fmtTime(m.u, a.Sent))
+	line("Onset", fmtTime(m.u, a.Onset))
+	line("Expires", fmtTime(m.u, a.Expires))
+	line("Ends", fmtTime(m.u, a.Ends))
 	b.WriteString("\n" + sDim.Render("Areas") + "\n" + sText.Render(strings.Join(wrap(a.AreaDesc, w), "\n")) + "\n")
 	if a.Description != "" {
 		b.WriteString("\n" + sAccent.Bold(true).Render("Description") + "\n" + sText.Render(wrapParas(a.Description, w)) + "\n")
@@ -765,17 +771,17 @@ func (m *Model) freshness(l *wx.Location, compact bool) string {
 	if compact {
 		switch {
 		case alertsStale || wxStale:
-			return sStale.Render("STALE") + sDim.Render(" "+clock(upd))
+			return sStale.Render("STALE") + sDim.Render(" "+m.u.Clock(upd))
 		case upd.IsZero():
 			return ""
 		}
-		return sFaint.Render(clock(upd))
+		return sFaint.Render(m.u.Clock(upd))
 	}
 	part := func(name string, t time.Time, stale bool) string {
 		if t.IsZero() {
 			return sDim.Render(name + " —")
 		}
-		s := sDim.Render(name+" ") + sText.Render(clock(t))
+		s := sDim.Render(name+" ") + sText.Render(m.u.Clock(t))
 		if stale {
 			s += " " + sStale.Render("STALE")
 		}
@@ -787,6 +793,8 @@ func (m *Model) freshness(l *wx.Location, compact bool) string {
 // loadState describes a location that has no data yet, or "".
 func loadState(l *wx.Location) string {
 	switch {
+	case errors.Is(l.PointErr, api.ErrNoCoverage):
+		return sErr.Render("outside NWS coverage")
 	case l.Point == nil && l.PointErr != nil:
 		return sErr.Render("lookup failed, retrying")
 	case l.Obs == nil && l.WxErr != nil:
@@ -830,41 +838,41 @@ func alertNames(l *wx.Location, now time.Time) []string {
 	return out
 }
 
-func todayHiLo(ps []api.Period) (hi, lo string, ok bool) {
+func todayHiLo(u units.Units, ps []api.Period) (hi, lo string, ok bool) {
 	for _, p := range ps {
 		if p.IsDaytime && hi == "" {
-			hi = fmt.Sprintf("↑%d°", p.Temperature)
+			hi = fmt.Sprintf("↑%d°", u.DegInt(p.Temperature))
 		}
 		if !p.IsDaytime && lo == "" {
-			lo = fmt.Sprintf("↓%d°", p.Temperature)
+			lo = fmt.Sprintf("↓%d°", u.DegInt(p.Temperature))
 		}
 	}
 	return hi, lo, hi != "" || lo != ""
 }
 
-func windText(o *api.Observation) string {
+func windText(u units.Units, o *api.Observation) string {
 	if o.WindMph == nil {
 		return "—"
 	}
 	if math.Round(*o.WindMph) == 0 {
 		return "calm"
 	}
-	s := fmt.Sprintf("%.0f mph", *o.WindMph)
+	s := u.Speed(*o.WindMph)
 	if o.WindDirDeg != nil {
 		s = api.Compass(*o.WindDirDeg) + " " + s
 	}
 	if o.GustMph != nil {
-		s += fmt.Sprintf(" g%.0f", *o.GustMph)
+		s += fmt.Sprintf(" g%.0f", u.SpeedValue(*o.GustMph))
 	}
 	return s
 }
 
-func forecastLine(p api.Period, w int) string {
+func forecastLine(u units.Units, p api.Period, w int) string {
 	arrow, col := "↓", lipgloss.Color("#93c5fd")
 	if p.IsDaytime {
 		arrow, col = "↑", tempColor(float64(p.Temperature))
 	}
-	temp := lipgloss.NewStyle().Foreground(col).Bold(true).Render(fmt.Sprintf("%s%3d°", arrow, p.Temperature))
+	temp := lipgloss.NewStyle().Foreground(col).Bold(true).Render(fmt.Sprintf("%s%3d°", arrow, u.DegInt(p.Temperature)))
 	pop := "    "
 	if p.PrecipChance != nil && *p.PrecipChance > 0 {
 		pop = sRain.Render(fmt.Sprintf("%3.0f%%", *p.PrecipChance))
@@ -876,7 +884,7 @@ func forecastLine(p api.Period, w int) string {
 
 // hourlyStrip draws temperature bars (rows tall) for the next hours with
 // temp labels above and hour / precip labels below.
-func hourlyStrip(hrs []api.Period, w, rows int) []string {
+func hourlyStrip(u units.Units, hrs []api.Period, w, rows int) []string {
 	const colW = 4
 	n := min(len(hrs), w/colW)
 	if n == 0 {
@@ -899,12 +907,12 @@ func hourlyStrip(hrs []api.Period, w, rows int) []string {
 		if hi > lo {
 			lvl = 2 + (h.Temperature-lo)*(levels-2)/(hi-lo)
 		}
-		temps.WriteString(st.Render(padRight(fmt.Sprintf("%d°", h.Temperature), colW)))
+		temps.WriteString(st.Render(padRight(fmt.Sprintf("%d°", u.DegInt(h.Temperature)), colW)))
 		for r := 0; r < rows; r++ {
 			fill := clamp(lvl-(rows-1-r)*8, 0, 8)
 			bars[r].WriteString(st.Render(strings.Repeat(string(blocks[fill]), colW-1)) + " ")
 		}
-		hours.WriteString(sDim.Render(padRight(hourLabel(h.Start), colW)))
+		hours.WriteString(sDim.Render(padRight(u.Hour(h.Start.Local()), colW)))
 		p := ""
 		if h.PrecipChance != nil && *h.PrecipChance >= 10 {
 			p = fmt.Sprintf("%.0f%%", *h.PrecipChance)
@@ -927,7 +935,7 @@ func hourlyStrip(hrs []api.Period, w, rows int) []string {
 }
 
 // sparkline is a one-row temperature trend for the next 12 hours.
-func sparkline(hrs []api.Period, w int) string {
+func sparkline(u units.Units, hrs []api.Period, w int) string {
 	n := min(len(hrs), 12, w)
 	if n < 2 {
 		return ""
@@ -946,10 +954,10 @@ func sparkline(hrs []api.Period, w int) string {
 		}
 		b.WriteString(lipgloss.NewStyle().Foreground(tempColor(float64(h.Temperature))).Render(string(blocks[k])))
 	}
-	return b.String() + sDim.Render(fmt.Sprintf(" %d–%d°", lo, hi))
+	return b.String() + sDim.Render(fmt.Sprintf(" %d–%d°", u.DegInt(lo), u.DegInt(hi)))
 }
 
-// bigText renders digits, '-', '°' and 'F' in a 3-row block font.
+// bigText renders digits, '-', '°', 'F' and 'C' in a 3-row block font.
 func bigText(s string, st lipgloss.Style) []string {
 	font := map[rune][3]string{
 		'0': {"█▀█", "█ █", "▀▀▀"},
@@ -965,6 +973,7 @@ func bigText(s string, st lipgloss.Style) []string {
 		'-': {"   ", "▀▀▀", "   "},
 		'°': {"▀", " ", " "},
 		'F': {"█▀▀", "█▀ ", "▀  "},
+		'C': {"█▀▀", "█  ", "▀▀▀"},
 	}
 	var rows [3]strings.Builder
 	for _, r := range s {
@@ -1001,43 +1010,23 @@ func ago(now, t time.Time) string {
 	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
-func clock(t time.Time) string {
-	if t.IsZero() {
-		return "—"
-	}
-	return t.Local().Format("3:04 PM")
-}
-
-func hourLabel(t time.Time) string {
-	h := t.Hour()
-	suffix := "a"
-	if h >= 12 {
-		suffix = "p"
-	}
-	h %= 12
-	if h == 0 {
-		h = 12
-	}
-	return fmt.Sprintf("%d%s", h, suffix)
-}
-
 // fmtWhen is a compact expiry: "3:00 PM", "Sat 5:00 AM".
-func fmtWhen(t, now time.Time) string {
+func fmtWhen(u units.Units, t, now time.Time) string {
 	if t.IsZero() {
 		return "—"
 	}
 	t = t.Local()
 	if y, mo, d := t.Date(); y == now.Year() && mo == now.Month() && d == now.Day() {
-		return t.Format("3:04 PM")
+		return t.Format(u.Layout("{clock}"))
 	}
-	return t.Format("Mon 3:04 PM")
+	return t.Format(u.Layout("Mon {clock}"))
 }
 
-func fmtTime(t time.Time) string {
+func fmtTime(u units.Units, t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.Local().Format("Mon Jan 2, 3:04 PM MST")
+	return t.Local().Format(u.Layout("Mon Jan 2, {clock} MST"))
 }
 
 func nonEmpty(ss ...string) []string {

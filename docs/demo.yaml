@@ -1,0 +1,15 @@
+# Locations for the README recording (docs/demo.tape). These are escowx's
+# original defaults: North County San Diego, where this project started.
+contact: you@example.com
+units: imperial
+clock: 12h
+locations:
+  - { name: Escondido,     lat: 33.1192, lon: -117.0864, primary: true }
+  - { name: San Marcos,    lat: 33.1434, lon: -117.1661 }
+  - { name: Valley Center, lat: 33.2184, lon: -117.0342 }
+  - { name: Ramona,        lat: 33.0417, lon: -116.8681 }
+  - { name: Poway,         lat: 32.9628, lon: -117.0359 }
+  - { name: Vista,         lat: 33.2000, lon: -117.2425 }
+  - { name: Oceanside,     lat: 33.1959, lon: -117.3795 }
+  - { name: San Diego,     lat: 32.7157, lon: -117.1611 }
+  - { name: Julian,        lat: 33.0787, lon: -116.6020 }

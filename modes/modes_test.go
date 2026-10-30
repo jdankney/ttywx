@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/j4mes/escowx/api"
+	"github.com/j4mes/ttywx/api"
 )
 
 var now = time.Date(2026, 10, 10, 13, 0, 0, 0, time.UTC)

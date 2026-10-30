@@ -3,5 +3,8 @@ docs/INITAL_PROMPT.md
 resume
 
 # build output and runtime log
-/escowx
-escowx.log
+/ttywx
+ttywx.log
+
+# goreleaser output
+/dist/

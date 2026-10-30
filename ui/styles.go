@@ -6,7 +6,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/j4mes/escowx/modes"
+	"github.com/j4mes/ttywx/modes"
 )
 
 // Dark-friendly palette.
@@ -54,6 +54,10 @@ func badge(m modes.Mode, short bool) string {
 // tempColor maps a Fahrenheit temperature to a cold→hot color.
 func tempColor(f float64) lipgloss.Color {
 	switch {
+	case f < 10:
+		return "#c4b5fd"
+	case f < 25:
+		return "#a5b4fc"
 	case f < 40:
 		return "#93c5fd"
 	case f < 55:
@@ -64,8 +68,10 @@ func tempColor(f float64) lipgloss.Color {
 		return "#fde047"
 	case f < 95:
 		return "#fb923c"
+	case f < 108:
+		return "#f87171"
 	}
-	return "#f87171"
+	return "#f43f5e"
 }
 
 type borderSet struct{ tl, tr, bl, br, h, v string }

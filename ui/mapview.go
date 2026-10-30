@@ -8,9 +8,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/j4mes/escowx/api"
-	"github.com/j4mes/escowx/modes"
-	"github.com/j4mes/escowx/wx"
+	"github.com/j4mes/ttywx/api"
+	"github.com/j4mes/ttywx/modes"
+	"github.com/j4mes/ttywx/units"
+	"github.com/j4mes/ttywx/wx"
 )
 
 // The Map tab plots every location at its real position over a colored
@@ -61,7 +62,9 @@ func stops(pairs ...any) []stop {
 }
 
 var (
-	tempStops = stops(30, "#3b82f6", 45, "#22d3ee", 60, "#4ade80", 72, "#facc15", 85, "#fb923c", 100, "#ef4444")
+	// °F. Wide enough for a northern winter and a desert summer.
+	tempStops = stops(-10, "#c4b5fd", 10, "#818cf8", 30, "#3b82f6", 45, "#22d3ee", 60, "#4ade80",
+		72, "#facc15", 85, "#fb923c", 100, "#ef4444", 115, "#be123c")
 	rainStops = stops(0, "#334155", 30, "#1d4ed8", 60, "#2563eb", 100, "#93c5fd")
 	mapEmpty  = hexRGB("#111827")
 	labelBg   = "#0b1220"
@@ -158,8 +161,8 @@ func (m *Model) layerLabel(l *wx.Location) string {
 		}
 	default:
 		if v, ok := m.layerValue(l); ok {
-			s := fmt.Sprintf("%.0f°", v)
-			if a := windArrow(l.Obs); a != "" {
+			s := m.u.Deg(v)
+			if a := windArrow(m.u, l.Obs); a != "" {
 				s += " " + a
 			}
 			return s
@@ -169,13 +172,13 @@ func (m *Model) layerLabel(l *wx.Location) string {
 }
 
 // windArrow points where the wind blows to (NWS reports where it's from).
-func windArrow(o *api.Observation) string {
+func windArrow(u units.Units, o *api.Observation) string {
 	if o == nil || o.WindDirDeg == nil || o.WindMph == nil || *o.WindMph < 0.5 {
 		return ""
 	}
 	arrows := [...]string{"↑", "↗", "→", "↘", "↓", "↙", "←", "↖"}
 	to := math.Mod(*o.WindDirDeg+180, 360)
-	return arrows[int(math.Round(to/45))%8] + fmt.Sprintf("%.0f", *o.WindMph)
+	return arrows[int(math.Round(to/45))%8] + fmt.Sprintf("%.0f", u.SpeedValue(*o.WindMph))
 }
 
 // fieldColor is the background color at a point for the current layer.
@@ -346,10 +349,11 @@ func (m *Model) renderCanvas(cw, ch int) []string {
 		put(0, cw-3, "N↑ ", "#cbd5e1", labelBg, true)
 	}
 	kmPerCell := 1 / pr.s
-	for _, mi := range []float64{100, 50, 25, 20, 10, 5, 2, 1} {
-		n := int(math.Round(mi * 1.609344 / kmPerCell))
+	unit, kmPerUnit := m.u.DistanceUnit()
+	for _, d := range []float64{1000, 500, 250, 200, 100, 50, 25, 20, 10, 5, 2, 1} {
+		n := int(math.Round(d * kmPerUnit / kmPerCell))
 		if n >= 3 && n <= cw/4 {
-			bar := "├" + strings.Repeat("─", n-2) + "┤" + fmt.Sprintf(" %g mi ", mi)
+			bar := "├" + strings.Repeat("─", n-2) + "┤" + fmt.Sprintf(" %g %s ", d, unit)
 			if free(ch-1, 1, len([]rune(bar))) {
 				put(ch-1, 1, bar, "#cbd5e1", labelBg, false)
 			}
@@ -408,9 +412,9 @@ func (m *Model) mapLegend(w int) string {
 	if !have {
 		return sDim.Render("no data for this layer yet")
 	}
-	unit := "°"
+	label := m.u.Deg
 	if m.mapLayer == layerRain {
-		unit = "%"
+		label = func(v float64) string { return fmt.Sprintf("%.0f%%", v) }
 	}
 	const n = 24
 	var bar strings.Builder
@@ -418,9 +422,9 @@ func (m *Model) mapLegend(w int) string {
 		v := lo + (hi-lo)*float64(k)/float64(n-1)
 		bar.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(m.layerColor(v).scale(1.6).hex())).Render("█"))
 	}
-	s := sText.Render(fmt.Sprintf("%.0f%s ", lo, unit)) + bar.String() + sText.Render(fmt.Sprintf(" %.0f%s", hi, unit))
+	s := sText.Render(label(lo)+" ") + bar.String() + sText.Render(" "+label(hi))
 	if m.mapLayer == layerTemp {
-		s += sDim.Render("   arrows: wind (blowing toward), mph")
+		s += sDim.Render("   arrows: wind (blowing toward), " + m.u.SpeedUnit())
 	} else {
 		s += sDim.Render("   chance of rain this hour")
 	}
@@ -434,9 +438,9 @@ func (m *Model) viewMapSide(w, h int) string {
 	body := []string{badge(l.Mode, false)}
 	temp := "—"
 	if l.Obs != nil && l.Obs.TempF != nil {
-		temp = lipgloss.NewStyle().Foreground(tempColor(*l.Obs.TempF)).Bold(true).Render(fmt.Sprintf("%.0f°F", *l.Obs.TempF))
+		temp = lipgloss.NewStyle().Foreground(tempColor(*l.Obs.TempF)).Bold(true).Render(m.u.Temp(*l.Obs.TempF))
 		if l.Obs.FeelsLikeF != nil {
-			temp += sDim.Render(fmt.Sprintf("  feels %.0f°F", *l.Obs.FeelsLikeF))
+			temp += sDim.Render("  feels " + m.u.Temp(*l.Obs.FeelsLikeF))
 		}
 	}
 	body = append(body, temp, sText.Render(conditions(l)))
@@ -445,9 +449,9 @@ func (m *Model) viewMapSide(w, h int) string {
 		if o.Humidity != nil {
 			hum = fmt.Sprintf("%.0f%%", *o.Humidity)
 		}
-		body = append(body, sDim.Render("Wind ")+sText.Render(windText(o)), sDim.Render("Humidity ")+sText.Render(hum))
+		body = append(body, sDim.Render("Wind ")+sText.Render(windText(m.u, o)), sDim.Render("Humidity ")+sText.Render(hum))
 	}
-	if hi, lo, ok := todayHiLo(l.Forecast); ok {
+	if hi, lo, ok := todayHiLo(m.u, l.Forecast); ok {
 		body = append(body, sDim.Render("Forecast ")+sText.Render(hi+" "+lo))
 	}
 	if len(l.Hourly) > 0 && l.Hourly[0].PrecipChance != nil {
@@ -468,7 +472,7 @@ func (m *Model) viewMapSide(w, h int) string {
 		}
 		t := ""
 		if p.Obs != nil && p.Obs.TempF != nil {
-			t = fmt.Sprintf("%.0f°", *p.Obs.TempF)
+			t = m.u.Deg(*p.Obs.TempF)
 		}
 		name := padRight(p.Cfg.Name, inner-2-2-5)
 		row := mark + modeFg(p.Mode).Render("● ") + sText.Render(name) + sDim.Render(fmt.Sprintf("%5s", t))

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -19,7 +20,7 @@ func testClient(url string) *Client {
 func TestRetriesOn503ThenSucceeds(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if ua := r.Header.Get("User-Agent"); ua != "escowx/"+Version+" (contact: test@example.com)" {
+		if ua := r.Header.Get("User-Agent"); ua != "ttywx/"+Version+" (contact: test@example.com)" {
 			t.Errorf("User-Agent = %q", ua)
 		}
 		if acc := r.Header.Get("Accept"); acc != "application/geo+json" {
@@ -101,5 +102,45 @@ func TestUnitConversions(t *testing.T) {
 	}
 	if Compass(294) != "WNW" || Compass(359) != "N" || Compass(0) != "N" {
 		t.Errorf("Compass wrong: %s %s", Compass(294), Compass(359))
+	}
+}
+
+func TestNoCoverage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/alerts/active" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"detail":"Parameter \"point\" is invalid: out of bounds"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"detail":"Unable to provide data for requested point 51.5,-0.12"}`))
+	}))
+	defer srv.Close()
+	c := testClient(srv.URL)
+
+	if _, err := c.ResolvePoint(context.Background(), 51.5, -0.12); !errors.Is(err, ErrNoCoverage) {
+		t.Errorf("ResolvePoint err = %v, want ErrNoCoverage", err)
+	}
+	if _, err := c.ActiveAlerts(context.Background(), 51.5, -0.12); !errors.Is(err, ErrNoCoverage) {
+		t.Errorf("ActiveAlerts err = %v, want ErrNoCoverage", err)
+	}
+}
+
+func TestForecastSI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("units") != "si" {
+			t.Errorf("units = %q, want si", r.URL.Query().Get("units"))
+		}
+		w.Write([]byte(`{"properties":{"periods":[{"name":"Today","temperature":19,"temperatureUnit":"C","detailedForecast":"High near 19."}]}}`))
+	}))
+	defer srv.Close()
+	c := testClient(srv.URL)
+	c.SI = true
+	ps, err := c.Forecast(context.Background(), srv.URL+"/gridpoints/BOU/1,1/forecast", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ps[0].Temperature != 66 || ps[0].TempUnit != "F" || ps[0].Detailed != "High near 19." {
+		t.Errorf("period = %+v, want 66 F with metric prose", ps[0])
 	}
 }

@@ -4,9 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 )
+
+// ErrNoCoverage means api.weather.gov has no data for a point, which almost
+// always means it is outside the US and its territories.
+var ErrNoCoverage = errors.New("outside NWS coverage (US and territories only)")
+
+// coverage maps the API's "no data for this point" responses to
+// ErrNoCoverage: 404 from /points and 400 "out of bounds" from /alerts.
+func coverage(err error) error {
+	var he *HTTPError
+	if errors.As(err, &he) && (he.Status == 404 || he.Status == 400 && strings.Contains(he.Detail, "out of bounds")) {
+		return ErrNoCoverage
+	}
+	return err
+}
 
 func coords(lat, lon float64) string {
 	// The API rejects more than 4 decimal places (it redirects to a
@@ -19,7 +34,7 @@ func coords(lat, lon float64) string {
 func (c *Client) ResolvePoint(ctx context.Context, lat, lon float64) (*Point, error) {
 	var pr pointResp
 	if err := c.getJSON(ctx, "/points/"+coords(lat, lon), &pr); err != nil {
-		return nil, err
+		return nil, coverage(err)
 	}
 	p := pr.Properties
 	pt := &Point{
@@ -47,7 +62,7 @@ func (c *Client) ResolvePoint(ctx context.Context, lat, lon float64) (*Point, er
 func (c *Client) ActiveAlerts(ctx context.Context, lat, lon float64) ([]Alert, error) {
 	var ac AlertCollection
 	if err := c.getJSON(ctx, "/alerts/active?point="+url.QueryEscape(coords(lat, lon)), &ac); err != nil {
-		return nil, err
+		return nil, coverage(err)
 	}
 	return ac.Alerts(), nil
 }
@@ -130,6 +145,9 @@ func (c *Client) Forecast(ctx context.Context, forecastURL string, max int) ([]P
 	if forecastURL == "" {
 		return nil, errors.New("no forecast URL for this point")
 	}
+	if c.SI {
+		forecastURL += "?units=si"
+	}
 	var fr forecastResp
 	if err := c.getJSON(ctx, forecastURL, &fr); err != nil {
 		return nil, err
@@ -139,14 +157,19 @@ func (c *Client) Forecast(ctx context.Context, forecastURL string, max int) ([]P
 		if len(out) >= max {
 			break
 		}
+		temp, unit := p.Temperature, p.TemperatureUnit
+		if unit == "C" {
+			// Whole °C → °F → °C round-trips exactly, so nothing is lost.
+			temp, unit = int(math.Round(float64(temp)*9/5+32)), "F"
+		}
 		out = append(out, Period{
 			Number:        p.Number,
 			Name:          p.Name,
 			Start:         p.StartTime,
 			End:           p.EndTime,
 			IsDaytime:     p.IsDaytime,
-			Temperature:   p.Temperature,
-			TempUnit:      p.TemperatureUnit,
+			Temperature:   temp,
+			TempUnit:      unit,
 			PrecipChance:  p.ProbabilityOfPrecipitation.Value,
 			WindSpeed:     p.WindSpeed,
 			WindDirection: p.WindDirection,
