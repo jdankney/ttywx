@@ -15,22 +15,22 @@ care about, with a four-level threat mode that turns into a flashing
 - Imperial or metric, 12- or 24-hour clock.
 - A single static binary for Linux, macOS, Windows and FreeBSD.
 
-ttywx started life as [escowx](https://github.com/j4mes/escowx), a dashboard
+ttywx started life as [escowx](https://github.com/jdankney/escowx), a dashboard
 for one corner of San Diego County.
 
 ## Install
 
-Download a binary from the [releases page](https://github.com/j4mes/ttywx/releases),
+Download a binary from the [releases page](https://github.com/jdankney/ttywx/releases),
 or with Go 1.24+:
 
 ```sh
-go install github.com/j4mes/ttywx@latest
+go install github.com/jdankney/ttywx@latest
 ```
 
 Or build from source:
 
 ```sh
-git clone https://github.com/j4mes/ttywx && cd ttywx
+git clone https://github.com/jdankney/ttywx && cd ttywx
 CGO_ENABLED=0 go build -o ttywx .
 ```
 

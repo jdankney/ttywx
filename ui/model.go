@@ -10,13 +10,13 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/j4mes/ttywx/api"
-	"github.com/j4mes/ttywx/config"
-	"github.com/j4mes/ttywx/demo"
-	"github.com/j4mes/ttywx/modes"
-	"github.com/j4mes/ttywx/tracker"
-	"github.com/j4mes/ttywx/units"
-	"github.com/j4mes/ttywx/wx"
+	"github.com/jdankney/ttywx/api"
+	"github.com/jdankney/ttywx/config"
+	"github.com/jdankney/ttywx/demo"
+	"github.com/jdankney/ttywx/modes"
+	"github.com/jdankney/ttywx/tracker"
+	"github.com/jdankney/ttywx/units"
+	"github.com/jdankney/ttywx/wx"
 )
 
 const (

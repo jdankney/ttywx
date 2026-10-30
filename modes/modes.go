@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/j4mes/ttywx/api"
+	"github.com/jdankney/ttywx/api"
 )
 
 type Mode int

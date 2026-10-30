@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/j4mes/ttywx/api"
-	"github.com/j4mes/ttywx/modes"
+	"github.com/jdankney/ttywx/api"
+	"github.com/jdankney/ttywx/modes"
 )
 
 type Tracker struct {

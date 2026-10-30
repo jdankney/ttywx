@@ -1,4 +1,4 @@
-module github.com/j4mes/ttywx
+module github.com/jdankney/ttywx
 
 go 1.24
 

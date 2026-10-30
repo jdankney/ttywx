@@ -8,10 +8,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/j4mes/ttywx/api"
-	"github.com/j4mes/ttywx/modes"
-	"github.com/j4mes/ttywx/units"
-	"github.com/j4mes/ttywx/wx"
+	"github.com/jdankney/ttywx/api"
+	"github.com/jdankney/ttywx/modes"
+	"github.com/jdankney/ttywx/units"
+	"github.com/jdankney/ttywx/wx"
 )
 
 // The Map tab plots every location at its real position over a colored

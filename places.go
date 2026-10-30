@@ -15,9 +15,9 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
-	"github.com/j4mes/ttywx/api"
-	"github.com/j4mes/ttywx/config"
-	"github.com/j4mes/ttywx/geo"
+	"github.com/jdankney/ttywx/api"
+	"github.com/jdankney/ttywx/config"
+	"github.com/jdankney/ttywx/geo"
 )
 
 // This file holds the commands that manage locations: `ttywx add`,

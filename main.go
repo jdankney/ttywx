@@ -11,10 +11,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/j4mes/ttywx/api"
-	"github.com/j4mes/ttywx/config"
-	"github.com/j4mes/ttywx/tracker"
-	"github.com/j4mes/ttywx/ui"
+	"github.com/jdankney/ttywx/api"
+	"github.com/jdankney/ttywx/config"
+	"github.com/jdankney/ttywx/tracker"
+	"github.com/jdankney/ttywx/ui"
 )
 
 const usage = `ttywx: a terminal dashboard for National Weather Service data

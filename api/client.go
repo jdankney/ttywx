@@ -16,7 +16,7 @@ import (
 const DefaultBaseURL = "https://api.weather.gov"
 
 // Version is reported in the User-Agent and by --version. Release builds
-// set it with -ldflags "-X github.com/j4mes/ttywx/api.Version=v1.2.3".
+// set it with -ldflags "-X github.com/jdankney/ttywx/api.Version=v1.2.3".
 var Version = "dev"
 
 // Client fetches and decodes NWS API resources. It is safe for concurrent use.

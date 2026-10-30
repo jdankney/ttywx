@@ -13,7 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/j4mes/ttywx/units"
+	"github.com/jdankney/ttywx/units"
 )
 
 // PlaceholderContact is the contact written to a fresh config. NWS asks that
